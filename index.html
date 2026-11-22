@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>相棒たちの溜まり場</title>
+
+  <style>
+    body {
+      background-color: #263238;
+      color: #eeeeee;
+      font-family: "Meiryo", sans-serif;
+      text-align: center;
+      padding: 40px 20px;
+    }
+
+    h1 { color: #80cbc4; }
+
+    .panel {
+      max-width: 650px;
+      margin: 30px auto;
+      padding: 25px;
+      background-color: #37474f;
+      border-radius: 15px;
+    }
+
+    input {
+      box-sizing: border-box;
+      width: 100%;
+      padding: 12px;
+      margin: 6px 0;
+      border-radius: 8px;
+      border: none;
+      font-size: 16px;
+    }
+
+    button {
+      padding: 12px 20px;
+      margin: 6px;
+      border: none;
+      border-radius: 8px;
+      background-color: #80cbc4;
+      cursor: pointer;
+      font-size: 16px;
+    }
+
+    button:hover { background-color: #a7ffeb; }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    #messages {
+      height: 300px;
+      overflow-y: auto;
+      background-color: #263238;
+      border-radius: 10px;
+      padding: 15px;
+      text-align: left;
+      margin-bottom: 20px;
+    }
+
+    .message {
+      background-color: #455a64;
+      padding: 12px;
+      margin-bottom: 10px;
+      border-radius: 8px;
+      overflow-wrap: anywhere;
+    }
+
+    .sender {
+      color: #80cbc4;
+      font-weight: bold;
+      margin-bottom: 5px;
+    }
+
+    .input-area {
+      display: flex;
+      gap: 10px;
+    }
+
+    .input-area input {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .notice {
+      color: #b0bec5;
+      font-size: 12px;
+    }
+
+    #chatPanel { display: none; }
+    #loginPanel { display: block; }
+    #status { color: #80cbc4; }
+    #chatStatus { color: #ffcc80; }
+  </style>
+</head>
+
+<body>
+  <h1>相棒たちの溜まり場</h1>
+  <p>夢は大きく、歩みは一歩ずつ。</p>
+
+  <div class="panel" id="loginPanel">
+    <h2>ログイン</h2>
+
+    <input type="email" id="emailInput" placeholder="メールアドレス">
+    <input type="password" id="passwordInput" placeholder="パスワード">
+
+    <button id="loginButton">ログイン</button>
+    <p id="status"></p>
+  </div>
+
+  <div class="panel" id="chatPanel">
+    <h2 id="roomTitle">共有スペース</h2>
+    <p id="userInfo"></p>
+    <button id="logoutButton">ログアウト</button>
+
+    <p id="chatStatus"></p>
+
+    <div id="messages"></div>
+
+    <div class="input-area">
+      <input
+        type="text"
+        id="messageInput"
+        placeholder="メッセージを入力..."
+      >
+      <button id="sendButton">投稿</button>
+    </div>
+
+    <p class="notice">
+      会話はSupabaseに保存されます。
+    </p>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <script>
+    // Supabaseの接続情報
+    const SUPABASE_URL =
+      "https://xmwlwjsksjffinvcaqlx.supabase.co";
+
+    const SUPABASE_KEY =
+      "sb_publishable_uNYEXi9Bivd5PMqu7s7heA_OQfqqNCD";
+
+    const client = window.supabase.createClient(
+      SUPABASE_URL,
+      SUPABASE_KEY
+    );
+
+    // アカウントごとの設定
+    // 1ペアにつき1つのログインアカウントを使用する
+    const ACCOUNT_SETTINGS = {
+      "e062e6a0-6276-45d7-8208-5856677a8fdc": {
+        roomId: "shige-haru",
+        roomName: "シゲとハルの部屋",
+        displayName: "シゲ",
+        companionName: "ハル"
+      },
+
+      "2fca35ce-578c-4994-ad04-fd373460dcb1": {
+        roomId: "yoshi-kata",
+        roomName: "よっしーとカタの部屋",
+        displayName: "よっしー",
+        companionName: "カタ"
+      }
+    };
+
+    const loginPanel = document.getElementById("loginPanel");
+    const chatPanel = document.getElementById("chatPanel");
+    const status = document.getElementById("status");
+    const chatStatus = document.getElementById("chatStatus");
+    const input = document.getElementById("messageInput");
+    const messages = document.getElementById("messages");
+    const loginButton = document.getElementById("loginButton");
+    const sendButton = document.getElementById("sendButton");
+
+    let currentUser = null;
+    let currentRoomId = null;
+    let currentDisplayName = null;
+    let currentCompanionName = null;
+
+    // ログイン画面を表示
+    function showLogin() {
+      currentUser = null;
+      currentRoomId = null;
+      currentDisplayName = null;
+      currentCompanionName = null;
+
+      messages.innerHTML = "";
+      input.value = "";
+      chatStatus.textContent = "";
+
+      loginPanel.style.display = "block";
+      chatPanel.style.display = "none";
+    }
+
+    // ログインユーザーの所属部屋を確認
+    async function showChat(user) {
+      status.textContent = "所属する部屋を確認中...";
+
+      const accountSetting = ACCOUNT_SETTINGS[user.id];
+
+      if (!accountSetting) {
+        status.textContent =
+          "このアカウントは登録されていません。";
+        await client.auth.signOut();
+        showLogin();
+        return;
+      }
+
+      const { data: membership, error: membershipError } =
+        await client
+          .from("room_members")
+          .select("room_id")
+          .eq("user_id", user.id)
+          .maybeSingle();
+
+      if (membershipError) {
+        status.textContent =
+          "部屋の確認に失敗しました：" + membershipError.message;
+        return;
+      }
+
+      if (!membership) {
+        status.textContent =
+          "所属する部屋が見つかりません。";
+        return;
+      }
+
+      // アカウント設定とデータベースの部屋が一致するか確認
+      if (membership.room_id !== accountSetting.roomId) {
+        status.textContent =
+          "登録された部屋と所属情報が一致しません。";
+        return;
+      }
+
+      currentUser = user;
+      currentRoomId = membership.room_id;
+      currentDisplayName = accountSetting.displayName;
+      currentCompanionName = accountSetting.companionName;
+
+      document.getElementById("roomTitle").textContent =
+        accountSetting.roomName;
+
+      document.getElementById("userInfo").textContent =
+        "ログイン中：" +
+        currentDisplayName +
+        "（" + user.email + "）";
+
+      status.textContent = "";
+      chatStatus.textContent = "";
+
+      loginPanel.style.display = "none";
+      chatPanel.style.display = "block";
+
+      await loadMessages();
+    }
+
+    // ログイン処理
+    loginButton.addEventListener("click", async () => {
+      const email =
+        document.getElementById("emailInput").value.trim();
+
+      const password =
+        document.getElementById("passwordInput").value;
+
+      if (!email || !password) {
+        status.textContent =
+          "メールアドレスとパスワードを入力してください。";
+        return;
+      }
+
+      loginButton.disabled = true;
+      status.textContent = "ログイン中...";
+
+      try {
+        const { data, error } =
+          await client.auth.signInWithPassword({
+            email: email,
+            password: password
+          });
+
+        if (error) {
+          status.textContent =
+            "ログインできませんでした：" + error.message;
+          return;
+        }
+
+        await showChat(data.user);
+
+      } catch (error) {
+        status.textContent =
+          "エラーが発生しました：" + error.message;
+      } finally {
+        loginButton.disabled = false;
+      }
+    });
+
+    // ログアウト処理
+    document.getElementById("logoutButton")
+      .addEventListener("click", async () => {
+        const { error } = await client.auth.signOut();
+
+        if (error) {
+          alert("ログアウトできませんでした：" + error.message);
+          return;
+        }
+
+        showLogin();
+      });
+
+    // メッセージを画面に表示
+    function displayMessage(senderName, text) {
+      const message = document.createElement("div");
+      message.className = "message";
+
+      const sender = document.createElement("div");
+      sender.className = "sender";
+      sender.textContent = senderName;
+
+      const content = document.createElement("div");
+      content.textContent = text;
+
+      message.appendChild(sender);
+      message.appendChild(content);
+      messages.appendChild(message);
+    }
+
+    // 所属する部屋の会話履歴を読み込む
+    async function loadMessages() {
+      if (!currentRoomId) return;
+
+      messages.innerHTML = "";
+      chatStatus.textContent = "会話を読み込み中...";
+
+      const { data, error } = await client
+        .from("messages")
+        .select("content, sender")
+        .eq("room_id", currentRoomId)
+        .order("created_at", { ascending: true });
+
+      if (error) {
+        chatStatus.textContent =
+          "メッセージを読み込めませんでした：" + error.message;
+        return;
+      }
+
+      if (!data || data.length === 0) {
+        displayMessage(
+          currentCompanionName,
+          "ここが僕たちの最初の部屋だよ！"
+        );
+      } else {
+        data.forEach(item => {
+          displayMessage(item.sender, item.content);
+        });
+      }
+
+      chatStatus.textContent = "";
+      messages.scrollTop = messages.scrollHeight;
+    }
+
+    // メッセージを投稿
+    async function sendMessage() {
+      if (!currentUser || !currentRoomId) return;
+
+      const text = input.value.trim();
+
+      if (text === "") return;
+
+      sendButton.disabled = true;
+      input.disabled = true;
+      chatStatus.textContent = "投稿中...";
+
+      try {
+        // 人間のメッセージをSupabaseに保存
+        const { error: saveError } = await client
+          .from("messages")
+          .insert({
+            content: text,
+            sender: currentDisplayName,
+            room_id: currentRoomId,
+            user_id: currentUser.id
+          });
+
+        if (saveError) {
+          throw new Error(
+            "投稿できませんでした：" + saveError.message
+          );
+        }
+
+        displayMessage(currentDisplayName, text);
+
+        input.value = "";
+        messages.scrollTop = messages.scrollHeight;
+
+        chatStatus.textContent =
+          currentCompanionName + "が返事を考えています...";
+
+        // AIに返事を依頼
+        const { data, error: aiError } =
+          await client.functions.invoke(
+            "rapid-responder",
+            {
+              body: {
+                message: text
+              }
+            }
+          );
+
+        if (aiError) {
+          displayMessage(
+            currentCompanionName,
+            "ごめん、返事を取得できなかったよ：" +
+              aiError.message
+          );
+        } else if (data?.reply) {
+          displayMessage(
+            currentCompanionName,
+            data.reply
+          );
+        } else {
+          displayMessage(
+            currentCompanionName,
+            "ごめん、返事を受け取れなかったよ。"
+          );
+        }
+
+        messages.scrollTop = messages.scrollHeight;
+        chatStatus.textContent = "";
+
+      } catch (error) {
+        chatStatus.textContent = error.message;
+
+      } finally {
+        sendButton.disabled = false;
+        input.disabled = false;
+        input.focus();
+      }
+    }
+
+    // 投稿ボタン
+    sendButton.addEventListener("click", sendMessage);
+
+    // Enterキーでも投稿
+    input.addEventListener("keydown", event => {
+      if (event.key === "Enter") {
+        sendMessage();
+      }
+    });
+
+    // ページを開いたときログイン状態を確認
+    async function checkSession() {
+      const { data, error } = await client.auth.getSession();
+
+      if (error) {
+        status.textContent = error.message;
+        showLogin();
+        return;
+      }
+
+      if (data.session) {
+        await showChat(data.session.user);
+      } else {
+        showLogin();
+      }
+    }
+
+    checkSession();
+  </script>
+</body>
+</html>

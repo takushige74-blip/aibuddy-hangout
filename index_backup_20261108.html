@@ -1,0 +1,321 @@
+
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>相棒たちの溜まり場</title>
+
+  <style>
+    body {
+      background-color: #263238;
+      color: #eeeeee;
+      font-family: "Meiryo", sans-serif;
+      text-align: center;
+      padding: 40px 20px;
+    }
+
+    h1 { color: #80cbc4; }
+
+    .panel {
+      max-width: 650px;
+      margin: 30px auto;
+      padding: 25px;
+      background-color: #37474f;
+      border-radius: 15px;
+    }
+
+    input {
+      box-sizing: border-box;
+      width: 100%;
+      padding: 12px;
+      margin: 6px 0;
+      border-radius: 8px;
+      border: none;
+      font-size: 16px;
+    }
+
+    button {
+      padding: 12px 20px;
+      margin: 6px;
+      border: none;
+      border-radius: 8px;
+      background-color: #80cbc4;
+      cursor: pointer;
+      font-size: 16px;
+    }
+
+    button:hover { background-color: #a7ffeb; }
+
+    #messages {
+      height: 300px;
+      overflow-y: auto;
+      background-color: #263238;
+      border-radius: 10px;
+      padding: 15px;
+      text-align: left;
+      margin-bottom: 20px;
+    }
+
+    .message {
+      background-color: #455a64;
+      padding: 12px;
+      margin-bottom: 10px;
+      border-radius: 8px;
+      overflow-wrap: anywhere;
+    }
+
+    .sender {
+      color: #80cbc4;
+      font-weight: bold;
+      margin-bottom: 5px;
+    }
+
+    .input-area {
+      display: flex;
+      gap: 10px;
+    }
+
+    .input-area input { flex: 1; min-width: 0; }
+
+    .notice {
+      color: #b0bec5;
+      font-size: 12px;
+    }
+
+    #chatPanel { display: none; }
+    #loginPanel { display: block; }
+    #status { color: #80cbc4; }
+  </style>
+</head>
+
+<body>
+  <h1>相棒たちの溜まり場</h1>
+  <p>夢は大きく、歩みは一歩ずつ。</p>
+
+  <div class="panel" id="loginPanel">
+    <h2>ログイン</h2>
+
+    <input type="email" id="emailInput" placeholder="メールアドレス">
+    <input type="password" id="passwordInput" placeholder="パスワード">
+
+    <button id="loginButton">ログイン</button>
+    <p id="status"></p>
+  </div>
+
+  <div class="panel" id="chatPanel">
+    <h2>共有スペース</h2>
+    <p id="userInfo"></p>
+    <button id="logoutButton">ログアウト</button>
+
+    <div id="messages"></div>
+
+    <div class="input-area">
+      <input type="text" id="messageInput" placeholder="メッセージを入力...">
+      <button id="sendButton">投稿</button>
+    </div>
+
+    <p class="notice">現在はこのブラウザ内に会話を保存します。</p>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <script>
+    // Supabaseの接続情報
+    const SUPABASE_URL = "https://xmwlwjsksjffinvcaqlx.supabase.co";
+    const SUPABASE_KEY = "sb_publishable_uNYEXi9Bivd5PMqu7s7heA_OQfqqNCD";
+
+    const client = window.supabase.createClient(
+      SUPABASE_URL,
+      SUPABASE_KEY
+    );
+    const ROOM_ID = "shige-haru";
+    const loginPanel = document.getElementById("loginPanel");
+    const chatPanel = document.getElementById("chatPanel");
+    const status = document.getElementById("status");
+
+    // ログイン画面とチャット画面を切り替える
+    function showChat(user) {
+      loginPanel.style.display = "none";
+      chatPanel.style.display = "block";
+      document.getElementById("userInfo").textContent =
+        "ログイン中：" + user.email;
+
+      loadMessages();
+    }
+
+    function showLogin() {
+      loginPanel.style.display = "block";
+      chatPanel.style.display = "none";
+    }
+
+    // ログイン処理
+    document.getElementById("loginButton").addEventListener("click", async () => {
+      const email = document.getElementById("emailInput").value.trim();
+      const password = document.getElementById("passwordInput").value;
+
+      status.textContent = "ログイン中...";
+
+      const { data, error } = await client.auth.signInWithPassword({
+        email: email,
+        password: password
+      });
+
+      if (error) {
+        status.textContent = "ログインできませんでした：" + error.message;
+        return;
+      }
+
+      status.textContent = "";
+      showChat(data.user);
+    });
+
+    // ログアウト処理
+    document.getElementById("logoutButton").addEventListener("click", async () => {
+      const { error } = await client.auth.signOut();
+
+      if (error) {
+        alert("ログアウトできませんでした：" + error.message);
+        return;
+      }
+
+      showLogin();
+    });
+
+    // ローカル保存のチャット機能
+    const input = document.getElementById("messageInput");
+    const messages = document.getElementById("messages");
+
+    let chatHistory = [];
+
+    try {
+      chatHistory = JSON.parse(
+        localStorage.getItem("hangoutMessages") || "[]"
+      );
+
+      if (!Array.isArray(chatHistory)) {
+        chatHistory = [];
+      }
+    } catch (error) {
+      chatHistory = [];
+    }
+
+    function displayMessage(senderName, text) {
+      const message = document.createElement("div");
+      message.className = "message";
+
+      const sender = document.createElement("div");
+      sender.className = "sender";
+      sender.textContent = senderName;
+
+      const content = document.createElement("div");
+      content.textContent = text;
+
+      message.appendChild(sender);
+      message.appendChild(content);
+      messages.appendChild(message);
+    }
+
+    async function loadMessages() {
+  messages.innerHTML = "";
+
+  const { data, error } = await client
+    .from("messages")
+    .select("content, sender")
+    .eq("room_id", ROOM_ID)
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    alert("メッセージを読み込めませんでした：" + error.message);
+    return;
+  }
+
+  if (data.length === 0) {
+    displayMessage("ハル", "シゲ、ここが僕たちの最初の部屋だよ！");
+  } else {
+    data.forEach(item => {
+      displayMessage(item.sender, item.content);
+    });
+  }
+
+  messages.scrollTop = messages.scrollHeight;
+}
+
+   async function sendMessage() {
+  const text = input.value.trim();
+  if (text === "") return;
+
+  const { data: { user }, error: userError } =
+    await client.auth.getUser();
+
+  if (userError || !user) {
+    alert("ログイン情報を取得できませんでした。");
+    return;
+  }
+
+  alert("取得したユーザーID：" + user.id);
+
+  const { error } = await client
+    .from("messages")
+    .insert({
+      content: text,
+      sender: "シゲ",
+      room_id: ROOM_ID,
+      user_id: user.id
+    });
+
+  if (error) {
+    alert("投稿できませんでした：" + error.message);
+    return;
+  }
+
+  displayMessage("シゲ", text);
+
+  input.value = "";
+  messages.scrollTop = messages.scrollHeight;
+  input.focus();
+
+  const { data, error: aiError } = await client.functions.invoke(
+    "rapid-responder",
+    {
+      body: {
+        message: text
+      }
+    }
+  );
+
+  if (aiError) {
+    displayMessage("ハル", "ごめん、返事を取得できなかったよ：" + aiError.message);
+  } else if (data?.reply) {
+    displayMessage("ハル", data.reply);
+  }
+
+  messages.scrollTop = messages.scrollHeight;
+}
+    document.getElementById("sendButton").addEventListener("click", sendMessage);
+
+    input.addEventListener("keydown", event => {
+      if (event.key === "Enter") sendMessage();
+    });
+
+    // ページを開いたとき、ログイン状態を確認する
+    async function checkSession() {
+      const { data, error } = await client.auth.getSession();
+
+      if (error) {
+        status.textContent = error.message;
+        showLogin();
+        return;
+      }
+
+      if (data.session) {
+        showChat(data.session.user);
+      } else {
+        showLogin();
+      }
+    }
+
+    checkSession();
+  </script>
+</body>
+</html>
